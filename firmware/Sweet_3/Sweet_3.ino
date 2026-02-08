@@ -19,7 +19,6 @@
 // changes from the original 16n 2.0.1  firmware from Tom Armitage:
 // - calibration of the max fader value is now possible when 'rotated' is active
 // - channel numbers are not inverted when 'rotate' is active
-// - added support for GESS (it makes midi notes with gates)
 // - added pitch bend option (when midiCC 127 is selected)
 
 #include <CD74HC4067.h>
@@ -53,29 +52,12 @@
 #define TO_CV_SLEW_M 0x14
 #define TO_CV_OFF 0x15
 
-#ifdef GESS // only necessary for GESS & midi note thing
 // panel led and function button pins:
 const int  Led_ = 12;
 const int  Butt = 15;
 // variables for the functon button
 bool _Butt ;
 bool old_Butt = HIGH;
-
-// gate in
-const int  G[8] = { 3, 0, 22, 20, 21, 23, 4, 2 };
-// variables for the gate inputs
-bool volatile _G[8] ; // state of the gate input
-bool old_G[8];
-bool nNote[8];
-bool nVelocity[8];
-// loop helpers
-int ii, k;
-// preset management
-int nAddress = 100; // memory address for GESS presets
-int nPreset;
-bool loadActive = false;
-bool saveActive = false;
-#endif
 
 MIDI_CREATE_DEFAULT_INSTANCE();
 
@@ -158,15 +140,6 @@ void setup()
   delay(BOOTDELAY);
 #endif
 
-#ifdef GESS
-  for (i = 0; i < 8; i++)
-  {
-    pinMode (G[i], INPUT_PULLUP);
-    old_G[i] = HIGH;
-    // default GESS settings does not read velocity and note from faders:
-    nNote[i] = false;
-    nVelocity[i] = false;
-  }
   pinMode (Butt, INPUT_PULLUP);
   pinMode (Led_, OUTPUT);
   // boot up pattern
@@ -177,7 +150,6 @@ void setup()
     digitalWrite(Led_, LOW);
     delay(100);
   }
-#endif
 
   checkDefaultSettings();
 
@@ -400,41 +372,6 @@ void loop()
     // map and update the value
     currentValue[i] = temp;
 
-    #ifdef GESS
-    // read the gate inputs
-    if (i < 8)
-    {
-      switch(i)
-      {
-        case 0:
-          _G[i] = digitalReadFast(3);
-          break;
-        case 1:
-          _G[i] = digitalReadFast(0);
-          break;
-        case 2:
-          _G[i] = digitalReadFast(22);
-          break;
-        case 3:
-          _G[i] = digitalReadFast(20);
-          break;
-        case 4:
-          _G[i] = digitalReadFast(21);
-          break;
-        case 5:
-          _G[i] = digitalReadFast(23);
-          break;
-        case 6:
-          _G[i] = digitalReadFast(4);
-          break;
-        case 7:
-          _G[i] = digitalReadFast(2);
-          break;
-      }
-      //_G[i] = digitalRead(G[i]);
-      //const int  G[8] = { 3, 0, 22, 20, 21, 23, 4, 2 };
-    }
-#endif
   }
 
   if (shouldDoMidiRead)
@@ -506,83 +443,34 @@ void doMidiWrite()
         midiDirty = 1;
       }
 
-      // only if GESS is not using the faders we send midiCC etc...
-#ifdef GESS
-      if ((( q < 8 ) && (nNote[q] == false)) || (( q > 7 ) && (nVelocity[q - 8] == false)))
+#ifdef PITCHBEND
+      if ( usbCCs[q] == 127 )
       {
-#endif
-
-#ifdef PITCHBEND
-        if ( usbCCs[q] == 127 )
-        {
-          usbMIDI.sendPitchBend((notShiftyTemp - 8192), usbChannels[q]);          
-        }
-        else
-#endif        
-        {          
-          // send the message over USB and physical MIDI
-          usbMIDI.sendControlChange(usbCCs[q], shiftyTemp, usbChannels[q]);
-        }
-#ifdef PITCHBEND
-        if ( trsCCs[q] == 127 )
-        { 
-          MIDI.sendPitchBend((notShiftyTemp - 8192), trsChannels[q]);
-        }
-        else
-#endif
-        {
-          // send the message over physical MIDI
-          MIDI.sendControlChange(trsCCs[q], shiftyTemp, trsChannels[q]);
-        }     
-
-#ifdef GESS
+        usbMIDI.sendPitchBend((notShiftyTemp - 8192), usbChannels[q]);          
       }
+      else
+#endif        
+      {          
+        // send the message over USB and physical MIDI
+        usbMIDI.sendControlChange(usbCCs[q], shiftyTemp, usbChannels[q]);
+      }
+#ifdef PITCHBEND
+      if ( trsCCs[q] == 127 )
+      { 
+        MIDI.sendPitchBend((notShiftyTemp - 8192), trsChannels[q]);
+      }
+      else
 #endif
+      {
+        // send the message over physical MIDI
+        MIDI.sendControlChange(trsCCs[q], shiftyTemp, trsChannels[q]);
+      }     
 
       // store the shifted value for future comparison
       lastMidiValue[q] = shiftyTemp;
 
       // D(Serial.printf("MIDI[%d]: %d\n", q, shiftyTemp));
     }
-
-#ifdef GESS
-    // Midi Note
-    if ((q > 7) && (_G[q - 8] != old_G[q - 8])) // only if the gate input has changed we do this:
-    {
-      k = ( q - 8) ;
-      if ( _G[k] == LOW ) //note ON
-      {
-        if (nNote[k] == true) // taking the note value from the upper row of faders instead of a fixed value
-        {
-          _nNote[k] = lastMidiValue[k];
-        }
-        if (nVelocity[k] == true) // taking the midi velocity from the lower row instead instead of a fixed value
-        {
-          _nVelocity[k] = lastMidiValue[q];
-        }
-        MIDI.sendNoteOn(_nNote[k], _nVelocity[k], _nChannel[k] ); // at the moment channels are 1 to 8 preassigned
-        usbMIDI.sendNoteOn(_nNote[k], _nVelocity[k], _nChannel[k] );
-        // ER-301
-        if(er301Present) {
-           // https://github.com/odevices/er-301/blob/develop/mods/teletype/Dispatcher.cpp
-           // SC.TR 1-n α --> Set TR value to α (0/1)
-           // commandTRSet(delay, getPort(msg), getValue(msg));
-           sendi2c(er301I2Caddress, 0, TO_TR, q-8, 1);
-        }
-        
-      }
-      else //Note Off
-      {
-        MIDI.sendNoteOff(_nNote[k], _nVelocity[k], _nChannel[k] );
-        usbMIDI.sendNoteOff(_nNote[k], _nVelocity[k], _nChannel[k] );
-        if(er301Present) {
-           sendi2c(er301I2Caddress, 0, TO_TR, q-8, 0);
-        }
-        
-      }
-      old_G[k] = _G[k];
-    }  //end of midi note code
-#endif
 
     if(i2cMaster) {
 
@@ -618,7 +506,6 @@ void doMidiWrite()
   }
   forceMidiWrite = false;
 
-  #ifdef GESS
   // button read to load & save presets etc:
   _Butt = digitalReadFast(Butt);
 
@@ -626,46 +513,12 @@ void doMidiWrite()
   {
     if (_Butt == true )
     {
-      // button depressed, switch the load preset mode
-      saveActive = false;
-      loadActive = !loadActive;
-      digitalWrite(Led_, loadActive);
-    }
-    else
-    {
-      saveActive = true;
+      // button depressed, send all I2C values
+      sendAllI2CValues();
     }
     old_Butt = _Butt;
   }
-
-  if ( saveActive ==  true )  // save preset if any of the GESS buttons/triggers is active
-  {
-    for (ii = 0; ii < 8; ii++)
-    {
-      if (_G[ii] == LOW)
-      {
-        savePreset(ii);
-        saveActive = false;
-        loadActive = true; // when the button is released it will become false ;-)
-        digitalWrite(Led_, HIGH);
-      }
-    }
-  }
-
-  if (( loadActive == true ) && ( _Butt == HIGH ))
-  {
-    for (ii = 0; ii < 8; ii++)
-    {
-      if (_G[ii] == LOW)
-      {
-        loadPreset(ii);
-        loadActive = false;
-        digitalWrite(Led_, LOW);
-      }
-    }
-  }// end of the preset management
   
-#endif
 } // end of doMidiWrite
 
 /*
@@ -766,70 +619,26 @@ void i2cReadRequest()
  */
 void actOnCommand(byte cmd, byte out, int value) {}
 
-#ifdef GESS
-void loadPreset(int nPreset)  //read eeprom
+
+void sendAllI2CValues()
 {
-  nAddress = 100 + ( nPreset * 16 );
-  for ( ii = 0; ii < 8; ii++ ) //gates
-  {
-    _nNote[ii] = EEPROM.read(nAddress);
-    if (_nNote[ii] == 0)
+  if(i2cMaster) {
+    // for 4 output devices
+    port = q % 4;
+    device = q / 4;
+    for (q = 0; q < channelCount; q++)
     {
-      nNote[ii] = true;
+      if(txoPresent) {
+        sendi2c(txoI2Caddress, device, 0x11, port, lastValue[q]);
+      }
+
+      if(er301Present) {
+        sendi2c(er301I2Caddress, 0, TO_CV_SET, q, lastValue[q]);
+      }
+
+      if(ansiblePresent) {
+        sendi2c(0x20, device << 1, 0x06, port, lastValue[q]);
+      }
     }
-    else
-    {
-      nNote[ii] = false;
-    }
-    nAddress++ ;
-    _nVelocity[ii] = EEPROM.read(nAddress);
-    if (_nVelocity[ii] == 0)
-    {
-      nVelocity[ii] = true;
-    }
-    else
-    {
-      nVelocity[ii] = false;
-    }
-    nAddress++ ;
-    //  _nChannel[ii] = EEPROM.read(nAddress);
-    //   nAddress++ ;
   }
 }
-void savePreset(int nPreset)
-{
-  nAddress = 100 + ( nPreset * 16 );
-  for ( ii = 0; ii < 8; ii++ ) //gates
-  {
-
-    if (lastMidiValue[ii] == 0)
-    {
-      nNote[ii] = true;
-      _nNote[ii] = 0;
-    }
-    else
-    {
-      nNote[ii] = false;
-    }
-
-    EEPROM.write(nAddress, _nNote[ii]);
-    nAddress++;
-
-    if (lastMidiValue[ii + 8] == 0)
-    {
-      nVelocity[ii] = true;
-      _nVelocity[ii] = 0;
-    }
-    else
-    {
-      nVelocity[ii] = false;
-    }
-
-    EEPROM.write(nAddress, _nVelocity[ii]);
-    nAddress++;
-    // midi channel setting are not saved because they're preassigned
-    //    EEPROM.write(nAddress, _nChannel[ii]);
-    //    nAddress++;
-  }
-}
-#endif

@@ -36,16 +36,6 @@ const int DEVICE_ID = 0x02; // 16n, do not change, needed by editor
 // largely only needed for "Sweet-Sixteen" type devices
 #define BOOTDELAY 10000
 
-// allow the Tsesseract Modular GESS & midi note implementation:
-#define GESS 1
-
-#ifdef GESS
-// default GESS settings (midi note, velocity and channel):
-byte _nNote[8] = { 30, 40, 50, 60, 70, 80, 90, 100 };
-byte _nVelocity[8] = { 120, 120, 120, 120, 120, 120, 120, 120 };
-byte _nChannel[8] = { 1, 2, 3, 4, 5, 6, 7, 8 };
-#endif
-
 // uncomment this to allow PITCHBEND for controller 127
 #define PITCHBEND 1
 

@@ -1,3 +1,7 @@
+# This Fork
+
+This fork removes all of the GESS code (I don't own one), and instead causes the button to rebroadcast all I2C values.  I use this with the Disting NT, after loading presets you can push the button, and then all of your fader positions will be pushed.  Useful if you turn off your rack, with faders in positions that are not part of your preset, and want to come back to it another time... you can use this to sync your NT to wherever you left your fader positions without having to wiggle all of the faders.
+
 # Sweet_3 Firmware
 
 Designed to run on a Teensy 3.2; 
